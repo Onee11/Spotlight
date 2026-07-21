@@ -1,0 +1,11 @@
+## Ignore Visual Studio / VS Code build artifacts
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.suo
+
+## Ignore OS files
+Thumbs.db
+Desktop.ini
