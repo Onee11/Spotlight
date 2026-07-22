@@ -5,6 +5,7 @@ obj/
 .vscode/
 *.user
 *.suo
+Publish/
 
 ## Ignore OS files
 Thumbs.db
