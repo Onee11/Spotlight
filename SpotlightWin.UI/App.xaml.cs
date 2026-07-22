@@ -50,6 +50,8 @@ namespace SpotlightWin.UI
             services.AddSingleton<ISearchProvider, CalculatorSearchProvider>();
             services.AddSingleton<ISearchProvider, WebSearchProvider>();
             services.AddSingleton<ISearchProvider, FileSearchProvider>();
+            services.AddSingleton<ISearchProvider, PowerCommandSearchProvider>();
+            services.AddSingleton<ISearchProvider, AiSearchProvider>();
 
             // Register ViewModel, Window, and Hotkey Service
             services.AddSingleton<MainViewModel>();

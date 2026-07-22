@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using SpotlightWin.Core.Models;
 
@@ -27,6 +28,22 @@ namespace SpotlightWin.UI
             }
         }
 
+        private void ResultsListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ResultsListBox.SelectedItem is SearchResult selected && selected.IsAiResult && !string.IsNullOrWhiteSpace(selected.FullContent))
+            {
+                AiPreviewText.Text = selected.FullContent;
+                AiPreviewPane.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                if (AiPreviewPane != null)
+                {
+                    AiPreviewPane.Visibility = Visibility.Collapsed;
+                }
+            }
+        }
+
         private void SearchBox_PreviewKeyDown(object sender, KeyEventArgs e)
         {
             // Esc Key -> Quick Dismiss
@@ -37,7 +54,7 @@ namespace SpotlightWin.UI
                 return;
             }
 
-            // Ctrl + C -> Copy selected result's file path to Clipboard
+            // Ctrl + C -> Copy selected result's path or content to Clipboard
             if (e.Key == Key.C && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
             {
                 if (ResultsListBox.SelectedItem is SearchResult selected && !string.IsNullOrEmpty(selected.ExecutionPath))

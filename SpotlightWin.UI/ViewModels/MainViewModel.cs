@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -15,6 +16,15 @@ namespace SpotlightWin.UI.ViewModels
 {
     public partial class MainViewModel : ObservableObject
     {
+        // --- Native Windows API Imports for System Commands ---
+        [DllImport("user32.dll")]
+        private static extern bool LockWorkStation();
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        private static extern int SHEmptyRecycleBin(IntPtr hwnd, string? pszRootPath, uint dwFlags);
+
+        private const uint SHERB_NOCONFIRMATION = 0x00000001;
+
         private readonly IEnumerable<ISearchProvider> _searchProviders;
         private CancellationTokenSource? _searchCts;
 
@@ -77,7 +87,7 @@ namespace SpotlightWin.UI.ViewModels
 
             try
             {
-                // Debounce input by 150ms to keep typing buttery smooth
+                // Debounce user input by 150ms to keep search fast and prevent UI lag
                 await Task.Delay(150, token);
                 if (token.IsCancellationRequested) return;
 
@@ -122,6 +132,7 @@ namespace SpotlightWin.UI.ViewModels
             {
                 string target = SelectedResult.ExecutionPath;
 
+                // 1. Clipboard Copy Engine (for Calculator and AI results)
                 if (target.StartsWith("copy:", StringComparison.OrdinalIgnoreCase))
                 {
                     string textToCopy = target.Substring(5);
@@ -130,6 +141,38 @@ namespace SpotlightWin.UI.ViewModels
                     return;
                 }
 
+                // 2. Windows Power Commands Engine
+                if (target.StartsWith("cmd:", StringComparison.OrdinalIgnoreCase))
+                {
+                    string action = target.Substring(4).ToLowerInvariant();
+                    ToggleVisibility();
+
+                    switch (action)
+                    {
+                        case "lock":
+                            LockWorkStation();
+                            break;
+
+                        case "recycle":
+                            SHEmptyRecycleBin(IntPtr.Zero, null, SHERB_NOCONFIRMATION);
+                            break;
+
+                        case "shutdown":
+                            Process.Start("shutdown.exe", "/s /t 0");
+                            break;
+
+                        case "restart":
+                            Process.Start("shutdown.exe", "/r /t 0");
+                            break;
+
+                        case "sleep":
+                            Process.Start("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0");
+                            break;
+                    }
+                    return;
+                }
+
+                // 3. Default Execution (Applications, Files, Web URLs)
                 var processInfo = new ProcessStartInfo
                 {
                     FileName = target,

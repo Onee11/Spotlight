@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using System.Windows;
 using System.Windows.Input;
+using SpotlightWin.Core.Models;
 using SpotlightWin.Infrastructure.Input;
 using SpotlightWin.Infrastructure.Services;
 
@@ -39,10 +40,13 @@ namespace SpotlightWin.UI
             _recordedModifiers = current.HotkeyModifiers;
             _recordedKey = current.HotkeyKey;
             _initialOpacity = current.Opacity;
+            
             HotkeyInputBox.Text = current.HotkeyDisplayText;
-
             OpacitySlider.Value = current.Opacity;
             OpacityValueText.Text = $"{(int)(current.Opacity * 100)}%";
+
+            // Load existing Gemini API Key
+            GeminiApiKeyInputBox.Text = current.GeminiApiKey ?? string.Empty;
 
             Closed += SettingsWindow_Closed;
         }
@@ -116,17 +120,19 @@ namespace SpotlightWin.UI
 
             if (success)
             {
-                var updatedSettings = new Core.Models.AppSettings
+                var updatedSettings = new AppSettings
                 {
                     HotkeyModifiers = _recordedModifiers,
                     HotkeyKey = _recordedKey,
                     HotkeyDisplayText = HotkeyInputBox.Text,
-                    Opacity = OpacitySlider.Value
+                    Opacity = OpacitySlider.Value,
+                    GeminiApiKey = GeminiApiKeyInputBox.Text.Trim()
                 };
 
                 _settingsService.SaveSettings(updatedSettings);
                 _initialOpacity = OpacitySlider.Value;
-                MessageBox.Show("Settings saved and applied!", "OmniLaunch", MessageBoxButton.OK, MessageBoxImage.Information);
+                
+                MessageBox.Show("Settings saved and applied!", "Spotlight", MessageBoxButton.OK, MessageBoxImage.Information);
                 Close();
             }
             else

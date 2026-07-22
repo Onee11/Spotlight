@@ -13,5 +13,9 @@ namespace SpotlightWin.Core.Models
         public ImageSource? Icon { get; set; }
         public int Score { get; set; }
         public string ExecutionPath { get; set; } = string.Empty;
+
+        // 🤖 AI Side Preview Properties
+        public bool IsAiResult { get; set; } = false;
+        public string FullContent { get; set; } = string.Empty;
     }
 }
