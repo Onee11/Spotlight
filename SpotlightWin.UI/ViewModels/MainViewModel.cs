@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -15,6 +16,7 @@ namespace SpotlightWin.UI.ViewModels
     public partial class MainViewModel : ObservableObject
     {
         private readonly IEnumerable<ISearchProvider> _searchProviders;
+        private CancellationTokenSource? _searchCts;
 
         [ObservableProperty]
         private string _searchQuery = string.Empty;
@@ -57,6 +59,10 @@ namespace SpotlightWin.UI.ViewModels
 
         private async Task PerformSearchAsync(string query)
         {
+            _searchCts?.Cancel();
+            _searchCts = new CancellationTokenSource();
+            var token = _searchCts.Token;
+
             ErrorMessage = string.Empty;
 
             if (string.IsNullOrWhiteSpace(query))
@@ -71,9 +77,14 @@ namespace SpotlightWin.UI.ViewModels
 
             try
             {
-                // Run all active search providers in parallel
+                // Debounce input by 150ms to keep typing buttery smooth
+                await Task.Delay(150, token);
+                if (token.IsCancellationRequested) return;
+
                 var tasks = _searchProviders.Select(p => p.SearchAsync(query));
                 var providerResults = await Task.WhenAll(tasks);
+
+                if (token.IsCancellationRequested) return;
 
                 var combinedResults = providerResults
                     .SelectMany(r => r)
@@ -84,6 +95,8 @@ namespace SpotlightWin.UI.ViewModels
 
                 Application.Current?.Dispatcher.Invoke(() =>
                 {
+                    if (token.IsCancellationRequested) return;
+
                     Results.Clear();
                     foreach (var result in combinedResults)
                     {
@@ -93,10 +106,10 @@ namespace SpotlightWin.UI.ViewModels
                     SelectedResult = Results.FirstOrDefault();
                 });
             }
+            catch (TaskCanceledException) { }
             catch (Exception ex)
             {
                 ErrorMessage = $"Search error: {ex.Message}";
-                Console.WriteLine($"[OmniLaunch] Search Exception: {ex.Message}");
             }
         }
 
@@ -109,17 +122,14 @@ namespace SpotlightWin.UI.ViewModels
             {
                 string target = SelectedResult.ExecutionPath;
 
-                // Handle Clipboard Copy
                 if (target.StartsWith("copy:", StringComparison.OrdinalIgnoreCase))
                 {
                     string textToCopy = target.Substring(5);
                     Clipboard.SetText(textToCopy);
-                    Console.WriteLine($"[OmniLaunch] Copied to clipboard: {textToCopy}");
                     ToggleVisibility();
                     return;
                 }
 
-                // Handle Executable / Shortcut / Web URL
                 var processInfo = new ProcessStartInfo
                 {
                     FileName = target,
@@ -131,7 +141,6 @@ namespace SpotlightWin.UI.ViewModels
             catch (Exception ex)
             {
                 ErrorMessage = $"Failed to execute '{SelectedResult.Title}': {ex.Message}";
-                Console.WriteLine($"[OmniLaunch] Execution Failure: {ex.Message}");
             }
         }
     }

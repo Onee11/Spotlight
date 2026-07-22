@@ -1,12 +1,10 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Windows.Forms;
 using System.Windows.Interop;
 
 namespace SpotlightWin.Infrastructure.Input
 {
-    /// <summary>
-    /// Listens for Win32 global system hotkeys.
-    /// </summary>
     public class GlobalHotkeyService : IDisposable
     {
         [DllImport("user32.dll", SetLastError = true)]
@@ -15,37 +13,45 @@ namespace SpotlightWin.Infrastructure.Input
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
-        private const int HOTKEY_ID = 9000;
+        public const int HOTKEY_ID = 9000;
         private const int WM_HOTKEY = 0x0312;
 
-        // --- WIN32 MODIFIERS REFERENCE ---
-        // MOD_ALT     = 0x0001
-        // MOD_CONTROL = 0x0002
-        // MOD_SHIFT   = 0x0004
-        // MOD_WIN     = 0x0008
+        public const uint MOD_ALT = 0x0001;
+        public const uint MOD_CONTROL = 0x0002;
+        public const uint MOD_SHIFT = 0x0004;
+        public const uint MOD_WIN = 0x0008;
 
-        // Default setup: Ctrl + Space
-        private const uint MODIFIERS = 0x0002; // MOD_CONTROL
-        private const uint VK_KEY = 0x20;      // VK_SPACE
-
-        private IntPtr _handle;
-        private HwndSource? _source;
-        private bool _disposed = false;
-
+        private IntPtr _hWnd;
+        private HwndSource? _hwndSource;
         public event Action? OnHotkeyPressed;
 
-        public void Register(IntPtr windowHandle)
+        public uint CurrentModifiers { get; private set; } = MOD_CONTROL;
+        public uint CurrentKey { get; private set; } = (uint)Keys.Space;
+
+        public bool Register(IntPtr handle, uint modifiers = MOD_CONTROL, uint key = (uint)Keys.Space)
         {
-            _handle = windowHandle;
-            _source = HwndSource.FromHwnd(_handle);
-            _source?.AddHook(HwndHook);
-            
-            bool registered = RegisterHotKey(_handle, HOTKEY_ID, MODIFIERS, VK_KEY);
-            if (!registered)
+            _hWnd = handle;
+            Unregister();
+
+            CurrentModifiers = modifiers;
+            CurrentKey = key;
+
+            bool success = RegisterHotKey(_hWnd, HOTKEY_ID, modifiers, key);
+            if (success)
             {
-                int errorCode = Marshal.GetLastWin32Error();
-                System.Diagnostics.Debug.WriteLine($"Failed to register hotkey. Win32 Error Code: {errorCode}");
+                if (_hwndSource == null)
+                {
+                    _hwndSource = HwndSource.FromHwnd(_hWnd);
+                    _hwndSource?.AddHook(HwndHook);
+                }
+                Console.WriteLine($"[GlobalHotkeyService] Registered Hotkey (Modifiers: {modifiers}, Key: {key}).");
             }
+            else
+            {
+                Console.WriteLine($"[GlobalHotkeyService] Failed to register hotkey.");
+            }
+
+            return success;
         }
 
         private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -58,31 +64,22 @@ namespace SpotlightWin.Infrastructure.Input
             return IntPtr.Zero;
         }
 
-        public void Dispose()
+        public void Unregister()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
+            if (_hWnd != IntPtr.Zero)
+            {
+                UnregisterHotKey(_hWnd, HOTKEY_ID);
+            }
         }
 
-        protected virtual void Dispose(bool disposing)
+        public void Dispose()
         {
-            if (!_disposed)
+            if (_hwndSource != null)
             {
-                if (disposing)
-                {
-                    if (_handle != IntPtr.Zero)
-                    {
-                        UnregisterHotKey(_handle, HOTKEY_ID);
-                    }
-                    if (_source != null)
-                    {
-                        _source.RemoveHook(HwndHook);
-                        _source.Dispose();
-                        _source = null;
-                    }
-                }
-                _disposed = true;
+                _hwndSource.RemoveHook(HwndHook);
+                _hwndSource = null;
             }
+            Unregister();
         }
     }
 }

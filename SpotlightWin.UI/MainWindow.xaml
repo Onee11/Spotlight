@@ -26,11 +26,13 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
+            <!-- Search Input Box with Key Event Handler -->
             <TextBox Grid.Row="0" 
                      Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}"
                      FontSize="24" Foreground="White" Background="Transparent" 
                      BorderThickness="0" VerticalContentAlignment="Center" Padding="20,0,20,0"
-                     CaretBrush="White" x:Name="SearchBox">
+                     CaretBrush="White" x:Name="SearchBox"
+                     PreviewKeyDown="SearchBox_PreviewKeyDown">
                 <TextBox.InputBindings>
                     <KeyBinding Key="Enter" Command="{Binding ExecuteSelectedCommand}" />
                 </TextBox.InputBindings>
@@ -38,7 +40,9 @@
                      
             <Rectangle Grid.Row="0" VerticalAlignment="Bottom" Height="1" Fill="#33FFFFFF"/>
             
+            <!-- Search Results List -->
             <ListBox Grid.Row="1" 
+                     x:Name="ResultsListBox"
                      ItemsSource="{Binding Results}" 
                      SelectedItem="{Binding SelectedResult}"
                      Background="Transparent" BorderThickness="0"
@@ -54,7 +58,7 @@
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
 
-                                <!-- Display Real App Icon -->
+                                <!-- Display Real App/File Icon -->
                                 <Grid Width="24" Height="24" VerticalAlignment="Center" HorizontalAlignment="Left">
                                     <Rectangle Width="24" Height="24" Fill="#22FFFFFF" RadiusX="4" RadiusY="4"/>
                                     <Image Width="24" Height="24" Source="{Binding Icon}" RenderOptions.BitmapScalingMode="HighQuality"/>
@@ -93,4 +97,4 @@
             </ListBox>
         </Grid>
     </Border>
-</Window>
+</Window> 
