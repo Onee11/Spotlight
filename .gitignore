@@ -10,3 +10,8 @@ Publish/
 ## Ignore OS files
 Thumbs.db
 Desktop.ini
+
+appsettings.json
+appsettings.Development.json
+settings.json
+*.env

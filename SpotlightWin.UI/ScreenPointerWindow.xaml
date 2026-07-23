@@ -1,0 +1,31 @@
+<Window x:Class="SpotlightWin.UI.ScreenPointerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Screen Pointer Overlay"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        Width="160" Height="160">
+    <Grid Name="MainGrid">
+        <Ellipse x:Name="PointerRing"
+                 Width="80" Height="80"
+                 Stroke="#00E6FF" StrokeThickness="4"
+                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                 RenderTransformOrigin="0.5,0.5">
+            <Ellipse.Effect>
+                <DropShadowEffect Color="#00C8FF" BlurRadius="20" ShadowDepth="0"/>
+            </Ellipse.Effect>
+            <Ellipse.RenderTransform>
+                <ScaleTransform x:Name="RingScale" ScaleX="1" ScaleY="1"/>
+            </Ellipse.RenderTransform>
+        </Ellipse>
+
+        <Border Background="#D00A0A14" CornerRadius="6" Padding="8,4"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,10">
+            <TextBlock x:Name="LabelText" Text="🎯 Pointing Here" Foreground="White" 
+                       FontSize="12" FontWeight="Bold"/>
+        </Border>
+    </Grid>
+</Window>
