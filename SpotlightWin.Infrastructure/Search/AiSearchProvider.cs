@@ -5,11 +5,13 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Automation;
 using System.Windows.Forms;
 using SpotlightWin.Core.Interfaces;
 using SpotlightWin.Core.Models;
@@ -26,6 +28,9 @@ namespace SpotlightWin.Infrastructure.Search
         private static readonly List<object> _conversationHistory = new();
         private static readonly object _historyLock = new();
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
         public AiSearchProvider()
         {
             _settingsService = new SettingsService();
@@ -41,6 +46,7 @@ namespace SpotlightWin.Infrastructure.Search
         public async Task<IEnumerable<SearchResult>> SearchAsync(string query)
         {
             _cts?.Cancel();
+            _cts?.Dispose();
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
 
@@ -67,7 +73,7 @@ namespace SpotlightWin.Infrastructure.Search
                 results.Add(new SearchResult
                 {
                     Title = "🪙 Flipping Coin...",
-                    Subtitle = "Press Enter to flip again",
+                    Subtitle = "Press Enter to flip coin",
                     ExecutionPath = "action:coin_flip",
                     Score = 100,
                     IsAiResult = true,
@@ -97,7 +103,7 @@ namespace SpotlightWin.Infrastructure.Search
                 results.Add(new SearchResult
                 {
                     Title = "🤖 Spotlight AI Assistant",
-                    Subtitle = "Try: 'flip a coin', 'point to top search bar', or 'summarize this article'",
+                    Subtitle = "Try: 'search news', 'flip a coin', 'point to File', or 'summarize this article'",
                     ExecutionPath = "copy:Please enter a prompt.",
                     Score = 100,
                     IsAiResult = false
@@ -125,28 +131,110 @@ namespace SpotlightWin.Infrastructure.Search
                 return results;
             }
 
-            // Detect pointing / clicking vision intent
+            // 🌐 2. LIVE WEB SEARCH & QWEN SUMMARY
+            bool isWebSearch = prompt.StartsWith("search ", StringComparison.OrdinalIgnoreCase) ||
+                               prompt.StartsWith("web ", StringComparison.OrdinalIgnoreCase) ||
+                               prompt.StartsWith("news ", StringComparison.OrdinalIgnoreCase) ||
+                               prompt.StartsWith("latest ", StringComparison.OrdinalIgnoreCase);
+
+            if (isWebSearch)
+            {
+                string searchQuery = Regex.Replace(prompt, @"^(search|web|news|latest)\s+", "", RegexOptions.IgnoreCase).Trim();
+
+                var webSnippets = await WebSearchService.FetchWebResultsAsync(searchQuery);
+
+                if (token.IsCancellationRequested) return results;
+
+                if (webSnippets.Count > 0)
+                {
+                    string qwenAnswer = await WebSearchService.AskQwenWithWebContextAsync(searchQuery, webSnippets, apiKey, token);
+
+                    string cleanSummary = Regex.Replace(qwenAnswer, @"\s+", " ").Trim();
+                    string singleLineTitle = cleanSummary.Length > 90 ? cleanSummary.Substring(0, 87) + "..." : cleanSummary;
+
+                    results.Add(new SearchResult
+                    {
+                        Title = $"🌐 Qwen Web Result: {singleLineTitle}",
+                        Subtitle = $"{webSnippets.Count} live web sources scraped • Press Enter to copy report",
+                        ExecutionPath = $"copy:{qwenAnswer}",
+                        Score = 100,
+                        IsAiResult = true,
+                        FullContent = qwenAnswer
+                    });
+                }
+                else
+                {
+                    results.Add(new SearchResult
+                    {
+                        Title = $"🌐 Web Search: '{searchQuery}'",
+                        Subtitle = "No live web results were found.",
+                        ExecutionPath = "copy:No web search results found.",
+                        Score = 100,
+                        IsAiResult = false
+                    });
+                }
+                return results;
+            }
+
+            // Detect pointing / clicking intent
             bool isPointAction = prompt.StartsWith("point", StringComparison.OrdinalIgnoreCase) ||
                                  prompt.StartsWith("where is", StringComparison.OrdinalIgnoreCase) ||
                                  prompt.StartsWith("where's", StringComparison.OrdinalIgnoreCase) ||
                                  prompt.StartsWith("locate", StringComparison.OrdinalIgnoreCase);
 
             bool isClickAction = prompt.StartsWith("click", StringComparison.OrdinalIgnoreCase);
-            bool isVisionQuery = isPointAction || isClickAction || DetectVisualIntent(prompt);
+
+            // ⚡ 3. NATIVE WINDOWS UI AUTOMATION (Fast & Exact, Background Thread)
+            if (isPointAction || isClickAction)
+            {
+                var uiMatch = await Task.Run(() => FindNativeUiElement(prompt), token);
+                if (token.IsCancellationRequested) return results;
+
+                if (uiMatch.HasValue)
+                {
+                    var match = uiMatch.Value;
+                    string actionType = isClickAction ? "click" : "point";
+                    string targetStr = $"action:{actionType}:{match.PercentX},{match.PercentY}|{prompt}";
+
+                    results.Add(new SearchResult
+                    {
+                        Title = isClickAction ? $"🎯 Native Click: '{match.FoundName}'" : $"🎯 Native Point: '{match.FoundName}'",
+                        Subtitle = $"Exact OS Element at {match.PercentX}%, {match.PercentY}%. Press Enter.",
+                        ExecutionPath = targetStr,
+                        Score = 100,
+                        IsAiResult = true,
+                        FullContent = $"Element '{match.FoundName}' found with native OS precision at ({match.PercentX}%, {match.PercentY}%)."
+                    });
+                    return results;
+                }
+                else
+                {
+                    results.Add(new SearchResult
+                    {
+                        Title = $"⚠️ Native Control Not Found",
+                        Subtitle = $"Could not locate an OS button or control matching '{prompt}' in active window.",
+                        ExecutionPath = "copy:Control not found",
+                        Score = 100,
+                        IsAiResult = false
+                    });
+                    return results;
+                }
+            }
+
+            // 👁️ 4. VISION AI FOR SUMMARIES & TEXT ANALYSIS ONLY
+            bool isVisionQuery = DetectVisualIntent(prompt);
 
             try
             {
                 string apiUrl = "https://api.groq.com/openai/v1/chat/completions";
-                string modelName = isVisionQuery ? "qwen/qwen3.6-27b" : "llama-3.3-70b-versatile";
+                string modelName = isVisionQuery ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
+
                 var messages = new List<object>();
 
                 if (isVisionQuery)
                 {
                     string base64Screen = CapturePrimaryScreenBase64();
-                    
-                    string systemText = (isPointAction || isClickAction)
-                        ? $"Locate element on screen: '{prompt}'. Respond ONLY in exact raw format without markdown: [X%, Y%]. Example: [45%, 12%]"
-                        : $"You are looking at a screenshot of the user's primary monitor. Answer concisely: {prompt}";
+                    string systemText = $"You are looking at a screenshot of the user's primary monitor. Answer concisely: {prompt}";
 
                     messages.Add(new
                     {
@@ -199,28 +287,9 @@ namespace SpotlightWin.Infrastructure.Search
 
                     aiAnswer = Regex.Replace(aiAnswer, @"<think>.*?</think>", "", RegexOptions.Singleline).Trim();
 
-                    // Check for Vision Point / Click Coordinate Match
-                    var match = Regex.Match(aiAnswer, @"\[?\s*(\d{1,3})\s*%?\s*,\s*(\d{1,3})\s*%?\s*\]?");
-                    if ((isPointAction || isClickAction) && match.Success)
-                    {
-                        string actionType = isClickAction ? "action:click" : "action:point";
-                        string targetStr = $"{actionType}:{match.Groups[1].Value},{match.Groups[2].Value}|{prompt}";
-
-                        results.Add(new SearchResult
-                        {
-                            Title = isClickAction ? $"🎯 Click target: '{prompt}'" : $"🎯 Point to target: '{prompt}'",
-                            Subtitle = $"Located at {match.Groups[1].Value}%, {match.Groups[2].Value}%. Press Enter to execute.",
-                            ExecutionPath = targetStr,
-                            Score = 100,
-                            IsAiResult = true,
-                            FullContent = $"Element found at coordinate ({match.Groups[1].Value}%, {match.Groups[2].Value}%)."
-                        });
-                        return results;
-                    }
-
                     string fullFormattedAnswer = aiAnswer;
                     
-                    // 🔧 FIX: Safely truncate title so long summaries don't overflow the UI ListBox
+                    // Safely truncate title so long summaries don't overflow the UI
                     string cleanText = Regex.Replace(aiAnswer, @"\s+", " ").Trim();
                     string singleLineTitle = cleanText.Length > 90 ? cleanText.Substring(0, 87) + "..." : cleanText;
 
@@ -286,7 +355,6 @@ namespace SpotlightWin.Infrastructure.Search
                 }
                 else
                 {
-                    // 🔧 FIX: Catch API errors (HTTP 400, 404, 429) and output them to the UI
                     string errorMessage = $"API Error ({response.StatusCode})";
                     try
                     {
@@ -325,6 +393,98 @@ namespace SpotlightWin.Infrastructure.Search
             return results;
         }
 
+        private static (double PercentX, double PercentY, string FoundName)? FindNativeUiElement(string targetText)
+        {
+            if (string.IsNullOrWhiteSpace(targetText)) return null;
+
+            string searchKey = targetText.ToLowerInvariant()
+                .Replace("point to", "")
+                .Replace("point", "")
+                .Replace("click on", "")
+                .Replace("click", "")
+                .Replace("where is", "")
+                .Replace("where's", "")
+                .Replace("locate", "")
+                .Replace("the", "")
+                .Trim();
+
+            if (searchKey.Length < 2) return null;
+
+            try
+            {
+                IntPtr hwnd = GetForegroundWindow();
+                AutomationElement activeWindow = hwnd != IntPtr.Zero 
+                    ? AutomationElement.FromHandle(hwnd) 
+                    : AutomationElement.RootElement;
+
+                if (activeWindow == null) return null;
+
+                System.Windows.Automation.Condition controlCondition = new OrCondition(
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Hyperlink),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem)
+                );
+
+                AutomationElementCollection elements = activeWindow.FindAll(TreeScope.Descendants, controlCondition);
+                AutomationElement? bestMatch = null;
+
+                int processedCount = 0;
+                const int maxScanLimit = 350; // Prevent high CPU load/freezes on large windows
+
+                foreach (AutomationElement element in elements)
+                {
+                    if (++processedCount > maxScanLimit) break;
+
+                    try
+                    {
+                        if (element.Current.IsOffscreen) continue;
+
+                        string name = element.Current.Name;
+                        if (string.IsNullOrWhiteSpace(name)) continue;
+
+                        string lowerName = name.ToLowerInvariant();
+
+                        if (lowerName.Equals(searchKey, StringComparison.OrdinalIgnoreCase))
+                        {
+                            bestMatch = element;
+                            break;
+                        }
+
+                        if (lowerName.Contains(searchKey) || searchKey.Contains(lowerName))
+                        {
+                            bestMatch = element;
+                        }
+                    }
+                    catch
+                    {
+                        // Skip stale or restricted controls
+                    }
+                }
+
+                if (bestMatch != null)
+                {
+                    var bounds = bestMatch.Current.BoundingRectangle;
+                    if (!bounds.IsEmpty && bounds.Width > 0 && bounds.Height > 0)
+                    {
+                        var primaryScreen = Screen.PrimaryScreen?.Bounds ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
+
+                        double centerX = bounds.X + (bounds.Width / 2.0);
+                        double centerY = bounds.Y + (bounds.Height / 2.0);
+
+                        double percentX = Math.Round((centerX / primaryScreen.Width) * 100.0, 1);
+                        double percentY = Math.Round((centerY / primaryScreen.Height) * 100.0, 1);
+
+                        return (percentX, percentY, bestMatch.Current.Name);
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
         private static bool DetectVisualIntent(string prompt)
         {
             string p = prompt.ToLowerInvariant();
@@ -340,9 +500,12 @@ namespace SpotlightWin.Infrastructure.Search
 
         private static string CapturePrimaryScreenBase64()
         {
-            var bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1080);
+            var bounds = Screen.PrimaryScreen?.Bounds ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
             using var bitmap = new Bitmap(bounds.Width, bounds.Height);
-            using (var g = Graphics.FromImage(bitmap)) { g.CopyFromScreen(Point.Empty, Point.Empty, bounds.Size); }
+            using (var g = Graphics.FromImage(bitmap)) 
+            { 
+                g.CopyFromScreen(System.Drawing.Point.Empty, System.Drawing.Point.Empty, bounds.Size); 
+            }
 
             int maxWidth = 1280, maxHeight = 720;
             double scale = Math.Min((double)maxWidth / bitmap.Width, (double)maxHeight / bitmap.Height);
